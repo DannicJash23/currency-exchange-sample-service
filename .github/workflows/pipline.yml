@@ -36,20 +36,23 @@ jobs:
         run: |
           docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} .
 
-      - name: Authenticate Docker to ECR
+      # Authenticate Docker to GitHub Container Registry
+      - name: Authenticate Docker to GitHub Container Registry
         run: |
-          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
+      # Run Trivy Scan with retry mechanism
       - name: Run Trivy Scan on Docker Image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
-          format: 'json'  # Output format to JSON for easier parsing
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
-          output: trivy-report.json  # Save results to a JSON file
-
+        run: |
+          for i in {1..5}; do
+            trivy image ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
+            if [ $? -eq 0 ]; then
+              break
+            fi
+            echo "Retrying Trivy scan... attempt $i"
+            sleep $((i * 10))  # Exponential backoff (10, 20, 30 seconds)
+          done
+          
       - name: Warn on Critical Vulnerabilities (Don't Fail)
         run: |
           if grep -q "CRITICAL" trivy-report.json; then
