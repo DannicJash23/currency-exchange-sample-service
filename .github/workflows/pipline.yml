@@ -44,6 +44,7 @@ jobs:
       - name: Push Docker Image to ECR
         run: |
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
+
   # Stage 2: Quality Checks
   quality_checks:
     name: Quality Checks
@@ -78,25 +79,25 @@ jobs:
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
   # Stage 3: Security Scans
-security_scans:
-  name: Security Scans
-  needs: build_and_push
-  runs-on: ubuntu-latest
-  steps:
-    - name: Docker Image Scan with Trivy
-      uses: aquasecurity/trivy-action@0.28.0
-      with:
-        image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
-        format: 'table'
-        severity: 'CRITICAL,HIGH'
-        ignore-unfixed: true
-    - name: Fail on Critical Vulnerabilities
-      run: |
-        if grep -q "CRITICAL" trivy-report.json; then
-          echo "Critical vulnerabilities found. Failing pipeline."
-          exit 1
-        fi
+  security_scans:
+    name: Security Scans
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Docker Image Scan with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
 
+      - name: Fail on Critical Vulnerabilities
+        run: |
+          if grep -q "CRITICAL" trivy-report.json; then
+            echo "Critical vulnerabilities found. Failing pipeline."
+            exit 1
+          fi
 
       - name: Install TFLint
         run: |
@@ -108,7 +109,7 @@ security_scans:
 
   # Stage 4: Deploy to Dev and QA
   deploy:
-    name: Deploy
+    name: Deploy to Dev and QA
     needs: [quality_checks, security_scans]
     runs-on: ubuntu-latest
     strategy:
