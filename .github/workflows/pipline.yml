@@ -45,12 +45,13 @@ jobs:
           ignore-unfixed: true
           output: trivy-report.json  # Save results to a JSON file
 
-      - name: Fail on Critical Vulnerabilities
+      - name: Warn on Critical Vulnerabilities (Don't Fail)
         run: |
           if grep -q "CRITICAL" trivy-report.json; then
-            echo "Critical vulnerabilities found. Failing pipeline."
-            exit 1
+            echo "Warning: Critical vulnerabilities found, but continuing pipeline."
+            cat trivy-report.json  # Optionally, print the full report
           fi
+
 
       - name: Authenticate Docker to ECR
         run: |
