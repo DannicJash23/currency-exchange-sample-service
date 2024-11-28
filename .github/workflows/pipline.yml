@@ -6,9 +6,10 @@ on:
       - dev
       - qa
       - main
+  pull_request:
 
 jobs:
-  # Stage 1: Build and Push Docker Image to AWS ECR
+  # Stage 1: Build and Push Docker Image
   build_and_push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
@@ -23,14 +24,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build with Maven
-        run: mvn clean install -DskipTests
-
-      - name: Set up AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+        run: mvn clean package -DskipTests
 
       - name: Authenticate Docker to ECR
         run: |
@@ -45,9 +39,9 @@ jobs:
         run: |
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
 
-  # Stage 2: Quality Checks (JUnit and SonarQube)
-  quality_check:
-    name: Quality Assurance (JUnit & SonarQube)
+  # Stage 2: Quality Checks
+  quality_checks:
+    name: Quality Checks
     needs: build_and_push
     runs-on: ubuntu-latest
     strategy:
@@ -59,7 +53,14 @@ jobs:
 
       - name: Run JUnit Tests
         if: matrix.tool == 'junit'
-        run: mvn test
+        run: |
+          mvn test
+          COVERAGE=$(grep -oP '(?<=<line-rate>)[0-9.]+(?=</line-rate>)' target/site/jacoco/index.html | awk '{print $1 * 100}')
+          echo "Coverage: $COVERAGE%"
+          if [ "${COVERAGE%.*}" -lt 80 ]; then
+            echo "Coverage below 80%. Failing pipeline."
+            exit 1
+          fi
 
       - name: SonarQube Analysis
         if: matrix.tool == 'sonarqube'
@@ -71,20 +72,9 @@ jobs:
             -Dsonar.host.url=${{ secrets.SONAR_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-      - name: Validate Test Coverage
-        if: matrix.tool == 'junit'
-        run: |
-          COVERAGE=$(grep -oP '(?<=<line-rate>)[0-9.]+(?=</line-rate>)' target/site/jacoco/index.html | awk '{print $1 * 100}')
-          echo "Coverage: $COVERAGE%"
-          if [ "${COVERAGE%.*}" -lt 80 ]; then
-            echo "Test coverage below 80%. Sending notification and terminating pipeline."
-            echo "Test coverage is $COVERAGE%" | mail -s "Pipeline Failure: Low Coverage" ${{ secrets.NOTIFICATION_EMAIL }}
-            exit 1
-          fi
-
-  # Stage 3: Security Scans (Trivy & TFLint)
-  security_scan:
-    name: Security Scans (Trivy & TFLint)
+  # Stage 3: Security Scans
+  security_scans:
+    name: Security Scans
     needs: build_and_push
     runs-on: ubuntu-latest
     steps:
@@ -97,8 +87,7 @@ jobs:
         run: |
           trivy image ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} > scan_results.json
           if grep -q "CRITICAL" scan_results.json; then
-            echo "Critical vulnerabilities found. Sending notification and terminating pipeline."
-            echo "Critical vulnerabilities found in image scan" | mail -s "Pipeline Failure: Vulnerabilities Detected" ${{ secrets.NOTIFICATION_EMAIL }}
+            echo "Critical vulnerabilities found. Failing pipeline."
             exit 1
           fi
 
@@ -110,44 +99,31 @@ jobs:
       - name: Run TFLint
         run: tflint
 
-  # Stage 4: Deploy to Dev Environment
-  deploy_dev:
-    name: Deploy to EKS (Dev)
-    needs: [quality_check, security_scan]
-    if: github.ref == 'refs/heads/dev'
+  # Stage 4: Deploy to Dev and QA
+  deploy:
+    name: Deploy
+    needs: [quality_checks, security_scans]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [dev, qa]
     steps:
       - name: Configure kubectl
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
 
-      - name: Deploy to Dev Environment
+      - name: Deploy to Environment
         run: |
-          kubectl apply -f k8s/dev/
+          kubectl apply -f k8s/${{ matrix.env }}/
 
-  # Stage 5: Deploy to QA Environment
-  deploy_qa:
-    name: Deploy to EKS (QA)
-    needs: [quality_check, security_scan]
-    if: github.ref == 'refs/heads/qa'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure kubectl
-        run: |
-          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
-
-      - name: Deploy to QA Environment
-        run: |
-          kubectl apply -f k8s/qa/
-
-  # Stage 6: Deploy to Production
+  # Stage 5: Deploy to Production
   deploy_prod:
-    name: Deploy to EKS (Prod)
-    needs: [quality_check, security_scan]
+    name: Deploy to Production
+    needs: [quality_checks, security_scans]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Manual Approval for Production
+      - name: Manual Approval
         uses: hmarr/auto-approve-action@v3
         with:
           approval: manual
@@ -156,6 +132,6 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
 
-      - name: Deploy to Production Environment
+      - name: Deploy to Production
         run: |
           kubectl apply -f k8s/prod/
