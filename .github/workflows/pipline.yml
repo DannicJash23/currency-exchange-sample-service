@@ -4,12 +4,12 @@ on:
   push:
     branches:
       - dev
-      - qa  
+      - qa
       - main
-      
 
 jobs:
-  build:
+  # Stage 1: Build and Push Docker Image to AWS ECR
+  build_and_push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
     steps:
@@ -45,9 +45,10 @@ jobs:
         run: |
           docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
 
+  # Stage 2: Quality Checks (JUnit and SonarQube)
   quality_check:
     name: Quality Assurance (JUnit & SonarQube)
-    needs: build
+    needs: build_and_push
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -70,60 +71,90 @@ jobs:
             -Dsonar.host.url=${{ secrets.SONAR_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-      - name: Validate Coverage
+      - name: Validate Test Coverage
+        if: matrix.tool == 'junit'
         run: |
           COVERAGE=$(grep -oP '(?<=<line-rate>)[0-9.]+(?=</line-rate>)' target/site/jacoco/index.html | awk '{print $1 * 100}')
+          echo "Coverage: $COVERAGE%"
           if [ "${COVERAGE%.*}" -lt 80 ]; then
-            echo "Test coverage below 80%. Terminating pipeline."
+            echo "Test coverage below 80%. Sending notification and terminating pipeline."
+            echo "Test coverage is $COVERAGE%" | mail -s "Pipeline Failure: Low Coverage" ${{ secrets.NOTIFICATION_EMAIL }}
             exit 1
           fi
 
+  # Stage 3: Security Scans (Trivy & TFLint)
   security_scan:
     name: Security Scans (Trivy & TFLint)
-    needs: build
+    needs: build_and_push
     runs-on: ubuntu-latest
     steps:
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+          sudo mv trivy /usr/local/bin/
+
       - name: Docker Image Scan with Trivy
         run: |
           trivy image ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} > scan_results.json
           if grep -q "CRITICAL" scan_results.json; then
-            echo "Critical vulnerabilities found. Terminating pipeline."
+            echo "Critical vulnerabilities found. Sending notification and terminating pipeline."
+            echo "Critical vulnerabilities found in image scan" | mail -s "Pipeline Failure: Vulnerabilities Detected" ${{ secrets.NOTIFICATION_EMAIL }}
             exit 1
           fi
+
+      - name: Install TFLint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+          sudo mv tflint /usr/local/bin/
 
       - name: Run TFLint
         run: tflint
 
+  # Stage 4: Deploy to Dev Environment
   deploy_dev:
     name: Deploy to EKS (Dev)
     needs: [quality_check, security_scan]
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     steps:
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
+
       - name: Deploy to Dev Environment
         run: |
           kubectl apply -f k8s/dev/
 
+  # Stage 5: Deploy to QA Environment
   deploy_qa:
     name: Deploy to EKS (QA)
     needs: [quality_check, security_scan]
     if: github.ref == 'refs/heads/qa'
     runs-on: ubuntu-latest
     steps:
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
+
       - name: Deploy to QA Environment
         run: |
           kubectl apply -f k8s/qa/
 
+  # Stage 6: Deploy to Production
   deploy_prod:
     name: Deploy to EKS (Prod)
     needs: [quality_check, security_scan]
-    if: github.ref == 'refs/heads/prod'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Manual Approval for Production
         uses: hmarr/auto-approve-action@v3
         with:
           approval: manual
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
 
       - name: Deploy to Production Environment
         run: |
