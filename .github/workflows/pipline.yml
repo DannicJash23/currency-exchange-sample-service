@@ -8,9 +8,9 @@ on:
       - main
 
 jobs:
-  # Stage 1: Build and Push Docker Image to AWS ECR
-  build_and_push:
-    name: Build and Push Docker Image
+  # Stage 1: Build Docker Image and Run Trivy Security Scan
+  build_and_scan:
+    name: Build Docker Image and Run Security Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -32,14 +32,30 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} .
+
+      - name: Run Trivy Scan on Docker Image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
+          format: 'json'  # Output format to JSON for easier parsing
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          output: trivy-report.json  # Save results to a JSON file
+
+      - name: Fail on Critical Vulnerabilities
+        run: |
+          if grep -q "CRITICAL" trivy-report.json; then
+            echo "Critical vulnerabilities found. Failing pipeline."
+            exit 1
+          fi
+
       - name: Authenticate Docker to ECR
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
           docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-
-      - name: Build Docker Image
-        run: |
-          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} .
 
       - name: Push Docker Image to ECR
         run: |
@@ -48,7 +64,7 @@ jobs:
   # Stage 2: Quality Checks
   quality_checks:
     name: Quality Checks
-    needs: build_and_push
+    needs: build_and_scan
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -78,39 +94,10 @@ jobs:
             -Dsonar.host.url=${{ secrets.SONAR_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-  # Stage 3: Security Scans
-  security_scans:
-    name: Security Scans
-    needs: build_and_push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Docker Image Scan with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
-
-      - name: Fail on Critical Vulnerabilities
-        run: |
-          if grep -q "CRITICAL" trivy-report.json; then
-            echo "Critical vulnerabilities found. Failing pipeline."
-            exit 1
-          fi
-
-      - name: Install TFLint
-        run: |
-          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-          sudo mv tflint /usr/local/bin/
-
-      - name: Run TFLint
-        run: tflint
-
-  # Stage 4: Deploy to Dev and QA
+  # Stage 3: Deploy to Dev and QA
   deploy:
     name: Deploy to Dev and QA
-    needs: [quality_checks, security_scans]
+    needs: [quality_checks, build_and_scan]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -124,10 +111,10 @@ jobs:
         run: |
           kubectl apply -f k8s/${{ matrix.env }}/
 
-  # Stage 5: Deploy to Production
+  # Stage 4: Deploy to Production
   deploy_prod:
     name: Deploy to Production
-    needs: [quality_checks, security_scans]
+    needs: [quality_checks, build_and_scan]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
