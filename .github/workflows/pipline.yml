@@ -78,23 +78,25 @@ jobs:
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
   # Stage 3: Security Scans
-  security_scans:
-    name: Security Scans
-    needs: build_and_push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install Trivy
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-          sudo mv trivy /usr/local/bin/
+security_scans:
+  name: Security Scans
+  needs: build_and_push
+  runs-on: ubuntu-latest
+  steps:
+    - name: Docker Image Scan with Trivy
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        image-ref: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
+        format: 'table'
+        severity: 'CRITICAL,HIGH'
+        ignore-unfixed: true
+    - name: Fail on Critical Vulnerabilities
+      run: |
+        if grep -q "CRITICAL" trivy-report.json; then
+          echo "Critical vulnerabilities found. Failing pipeline."
+          exit 1
+        fi
 
-      - name: Docker Image Scan with Trivy
-        run: |
-          trivy image ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} > scan_results.json
-          if grep -q "CRITICAL" scan_results.json; then
-            echo "Critical vulnerabilities found. Failing pipeline."
-            exit 1
-          fi
 
       - name: Install TFLint
         run: |
