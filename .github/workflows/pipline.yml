@@ -26,7 +26,7 @@ jobs:
         run: mvn clean install -DskipTests
 
       - name: Set up AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v2  # Upgraded to v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -35,6 +35,11 @@ jobs:
       - name: Build Docker Image
         run: |
           docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} .
+
+      - name: Authenticate Docker to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
       - name: Run Trivy Scan on Docker Image
         uses: aquasecurity/trivy-action@0.28.0
@@ -51,12 +56,6 @@ jobs:
             echo "Warning: Critical vulnerabilities found, but continuing pipeline."
             cat trivy-report.json  # Optionally, print the full report
           fi
-
-
-      - name: Authenticate Docker to ECR
-        run: |
-          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
 
       - name: Push Docker Image to ECR
         run: |
