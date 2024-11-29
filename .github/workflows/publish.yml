@@ -109,7 +109,13 @@ jobs:
           aws sns publish --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
             --region $AWS_REGION \
             --message "Build failed for project: kanth233_currency-exchange-sample-service due to quality gate failure or insufficient coverage."
-      
+           - name: Set up AWS credentials
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }} 
       - name: Install kubectl
         run: |
           curl -LO "https://dl.k8s.io/release/v1.23.0/bin/linux/amd64/kubectl"
