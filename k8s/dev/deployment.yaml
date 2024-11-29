@@ -22,8 +22,7 @@ spec:
     spec:
       containers:
         - name: currency-exchange
-          image: 009160053040.dkr.ecr.ap-south-1.amazonaws.com/currency-exchange-sample-service:8dfed4d5ec629aae7d297a1ffe8eaf19cddc262e
-          ports:
+          image: 009160053040.dkr.ecr.ap-south-1.amazonaws.com/currency-exchange-sample-service:latest
             - containerPort: 8000
           env:
             - name: AWS_REGION
@@ -40,7 +39,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: currency-exchange-service
-  namespace: prod  # Specifies the prod namespace
+  namespace: dev  # Change the namespace to dev
 spec:
   selector:
     app: currency-exchange
@@ -48,4 +47,4 @@ spec:
     - protocol: TCP
       port: 8000
       targetPort: 8000
-  type: LoadBalancer
+  type: ClusterIP  # Change to ClusterIP to avoid load balancer
