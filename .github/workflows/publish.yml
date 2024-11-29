@@ -137,17 +137,3 @@ jobs:
         run: |
           kubectl apply -f k8s/dev/deployment.yaml
           kubectl apply -f k8s/qa/deployment.yaml
-
-  # Stage 3: Deploy to Production (Manual Approval Required)
-  deploy_prod:
-    name: Deploy to Production (Manual Approval Required)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for Manual Approval
-        uses: peter-evans/wait-for-approval@v2
-        with:
-          approval-required: true
-
-      - name: Deploy Application to EKS (Prod)
-        run: |
-          kubectl apply -f k8s/prod/deployment.yaml
