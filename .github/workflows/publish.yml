@@ -1,15 +1,53 @@
-name: SonarQube Cloud
+name: SonarQube CI/CD Pipeline
 
 on:
   push:
     branches:
-      - main 
+      - main
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
-  build:
-    name: Build and Analyze
+  # Stage 1: Build and Push Docker Image to AWS ECR
+  build_and_push:
+    name: Build and Push Docker Image to AWS ECR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Java Environment
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build with Maven
+        run: mvn clean install -DskipTests
+
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Authenticate Docker to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} .
+
+      - name: Push Docker Image to ECR
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
+
+  # Stage 2: Build and Analyze with SonarQube
+  build_and_analyze:
+    name: Build and Analyze with SonarQube
     runs-on: ubuntu-latest
     steps:
       # Step 1: Checkout Code
@@ -24,7 +62,7 @@ jobs:
           java-version: 17
           distribution: 'zulu'
 
-      # Step 3: Cache SonarQube Cloud Packages
+      # Step 3: Cache SonarQube Cloud packages
       - name: Cache SonarQube Cloud packages
         uses: actions/cache@v4
         with:
@@ -40,7 +78,7 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
-      # Step 5: Skip Tests During Build
+      # Step 5: Build and Analyze with SonarQube
       - name: Build and Analyze with SonarQube
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,7 +87,8 @@ jobs:
           mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
             -Dsonar.projectKey=kanth233_currency-exchange-sample-service \
             -Dsonar.host.url=${{ secrets.SONAR_URL }} \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }}   -DskipTests
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }} \
+            -DskipTests
 
       # Step 6: Fail Pipeline on Quality Gate Failure
       - name: Quality Gate Check
@@ -64,7 +103,7 @@ jobs:
             exit 1
           fi
 
-      # Step 7: Notify on Failure
+      # Step 7: Send Notification on Failure
       - name: Send Notification
         if: failure()
         env:
