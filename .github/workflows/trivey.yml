@@ -1,0 +1,87 @@
+name: Build and Scan Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ] 
+permissions: write-all
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache Docker layers
+        uses: actions/cache@v2
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Docker image
+        id: build-image
+        run: |
+          docker build -t my-image:pr-${{ github.event.number }} .
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget https://github.com/aquasecurity/trivy/releases/download/v0.40.0/trivy_0.40.0_Linux-64bit.deb
+          sudo dpkg -i trivy_0.40.0_Linux-64bit.deb
+
+      - name: Scan Docker image with Trivy
+        id: scan-image
+        run: |
+          trivy image --format json --output scan-results.json my-image:pr-${{ github.event.number }}
+
+      - name: Extract high and critical vulnerabilities
+        id: extract_vulnerabilities
+        run: |
+          jq -r '
+          def hr(severity):
+            if severity == "HIGH" or severity == "CRITICAL" then true else false end;
+          def to_md:
+            "| " + (.VulnerabilityID // "") + " | " + (.PkgName // "") + " | " + (.InstalledVersion // "") + " | " + (.Severity // "") + " | " + (.Title // "") + " |";
+          [
+            "# Docker Image Scan Results",
+            "",
+            "## High and Critical Vulnerabilities",
+            "",
+            "| Vulnerability ID | Package | Version | Severity | Description |",
+            "|------------------|---------|---------|----------|-------------|",
+            (.Results[]? | .Vulnerabilities[]? | select(hr(.Severity)) | to_md),
+            ""
+          ] | join("\n")
+          ' scan-results.json > vulnerability-report.md || echo "# No vulnerabilities found or scan failed." > vulnerability-report.md
+
+      - name: Capture scan results
+        id: capture_results
+        run: |
+          content=$(cat vulnerability-report.md | head -c 65000)
+          echo "report<<EOF" >> $GITHUB_ENV
+          echo "$content" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v3  # Updated to v3
+        with:
+          name: vulnerability-report
+          path: vulnerability-report.md
+
+      - name: Comment scan results on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: Docker Image Scan Results
+          message: |
+            Trivy scan report:
+            ${{ env.report }}
+            
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
