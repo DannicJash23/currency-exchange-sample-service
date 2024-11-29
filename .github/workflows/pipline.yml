@@ -8,9 +8,9 @@ on:
       - main
 
 jobs:
-  # Stage 1: Build Docker Image and Run Trivy Security Scan
+  # Stage 1: Build Docker Image
   build_and_scan:
-    name: Build Docker Image and Run Trivy Security Scan
+    name: Build Docker Image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -95,18 +95,13 @@ jobs:
         run: |
           kubectl apply -f k8s/${{ matrix.env }}/
 
-  # Stage 4: Deploy to Production
+  # Stage 4: Deploy to Production (Automated)
   deploy_prod:
     name: Deploy to Production
     needs: [quality_checks, build_and_scan]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Manual Approval
-        uses: hmarr/auto-approve-action@v3
-        with:
-          approval: manual
-
       - name: Configure kubectl
         run: |
           aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name docker-cluster
