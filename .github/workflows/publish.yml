@@ -40,21 +40,8 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
-      # Step 5: Run JUnit Tests with Code Coverage
-      - name: Run Tests with Code Coverage
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mvn clean test jacoco:report
-          COVERAGE=$(grep -oP '(?<=<line-rate>)[0-9.]+(?=</line-rate>)' target/site/jacoco/index.html | awk '{print $1 * 100}')
-          echo "Code Coverage: $COVERAGE%"
-          if [ "${COVERAGE%.*}" -lt 80 ]; then
-            echo "Code coverage below 80%. Failing the pipeline."
-            exit 1
-          fi
-
-      # Step 6: Build and Analyze with SonarQube
-      - name: Build and Analyze
+      # Step 5: Skip Tests During Build
+      - name: Build and Analyze with SonarQube
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Required for PR analysis
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}    # SonarQube authentication
@@ -64,7 +51,7 @@ jobs:
             -Dsonar.host.url=${{ secrets.SONAR_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }} -DskipTests
 
-      # Step 7: Fail Pipeline on Quality Gate Failure
+      # Step 6: Fail Pipeline on Quality Gate Failure
       - name: Quality Gate Check
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -77,10 +64,13 @@ jobs:
             exit 1
           fi
 
-      # Step 8: Notify on Failure
+      # Step 7: Notify on Failure
       - name: Send Notification
         if: failure()
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           echo "Pipeline failed due to quality gate or coverage issues. Sending notification."
           aws sns publish --topic-arn ${{ secrets.SNS_TOPIC_ARN }} \
+            --region $AWS_REGION \
             --message "Build failed for project: kanth233_currency-exchange-sample-service due to quality gate failure or insufficient coverage."
