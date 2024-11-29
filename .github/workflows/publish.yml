@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for Manual Approval
-        uses: pmatseykanets/wait-for-approval-action@v1.0.0
+        uses: peter-evans/wait-for-approval@v2
         with:
           approval-required: true
 
