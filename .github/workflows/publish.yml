@@ -1,4 +1,4 @@
-name: SonarQube CI/CD Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -122,6 +122,10 @@ jobs:
 
       - name: Configure kubectl
         run: echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        
+      - name: Configure kubectl with EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
       - name: Deploy to EKS
         run: |
