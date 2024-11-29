@@ -1,0 +1,25 @@
+name: Notify
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        required: true
+        type: string
+        description: "Pipeline status (success or failure)"
+      environment:
+        required: false
+        type: string
+        description: "Target environment (optional)"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify via SNS
+        uses: aws-actions/sns-publish@v1
+        with:
+          topic-arn: ${{ secrets.SNS_TOPIC_ARN }}
+          message: |
+            Pipeline for environment ${{ inputs.environment }} completed with status: ${{ inputs.status }}
+          region: ${{ secrets.AWS_REGION }}
