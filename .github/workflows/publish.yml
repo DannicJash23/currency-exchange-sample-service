@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: 17
-          distribution: 'zulu' # Other distributions like 'temurin' can be used.
+          distribution: 'zulu'
 
       # Step 3: Cache SonarQube Cloud Packages
       - name: Cache SonarQube Cloud packages
@@ -43,8 +43,8 @@ jobs:
       # Step 5: Skip Tests During Build
       - name: Build and Analyze with SonarQube
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Required for PR analysis
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}    # SonarQube authentication
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
             -Dsonar.projectKey=kanth233_currency-exchange-sample-service \
@@ -68,6 +68,8 @@ jobs:
       - name: Send Notification
         if: failure()
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
           echo "Pipeline failed due to quality gate or coverage issues. Sending notification."
