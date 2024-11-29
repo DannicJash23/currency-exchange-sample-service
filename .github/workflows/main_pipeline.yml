@@ -15,6 +15,7 @@ jobs:
 
   deploy:
     if: github.ref_name == 'dev' || github.ref_name == 'qa' || github.ref_name == 'main'
+    needs: build_and_scan
     uses: ./.github/workflows/deploy.yml
     with:
       environment: ${{ github.ref_name }}
@@ -24,5 +25,5 @@ jobs:
     needs: [build_and_scan, deploy]
     uses: ./.github/workflows/notify.yml
     with:
-      status: ${{ job.status }}
+      status: ${{ needs.deploy.result }}
       environment: ${{ github.ref_name }}
