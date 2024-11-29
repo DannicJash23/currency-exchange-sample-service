@@ -1,89 +1,28 @@
-name: CI/CD Pipeline
+name: Main CI/CD Pipeline
 
 on:
   push:
     branches:
-      - main
       - dev
       - qa
+      - main
 
 jobs:
-  # Stage 1: Build and Scan
   build_and_scan:
-    name: Build and Scan Docker Image
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    uses: ./.github/workflows/build_and_scan.yml
+    with:
+      branch: ${{ github.ref_name }}
 
-      - name: Set up Java Environment
-        uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+  deploy:
+    if: github.ref_name == 'dev' || github.ref_name == 'qa' || github.ref_name == 'main'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: ${{ github.ref_name }}
+      image_tag: ${{ github.sha }}
 
-      - name: Build with Maven
-        run: mvn clean install -DskipTests
-
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/download/v0.40.0/trivy_0.40.0_Linux-64bit.deb
-          sudo dpkg -i trivy_0.40.0_Linux-64bit.deb
-
-      - name: Set up AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Authenticate Docker to ECR
-        run: |
-          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
-          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-
-      - name: Build Docker Image
-        run: |
-          docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }} .
-
-      - name: Scan Docker Image with Trivy
-        id: scan-image
-        run: |
-          trivy image --format json --output scan-results.json \
-          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
-
-      - name: Extract Vulnerabilities
-        id: extract-vulnerabilities
-        run: |
-          jq -r '
-          def hr(severity):
-            if severity == "HIGH" or severity == "CRITICAL" then true else false end;
-          def to_md:
-            "| " + (.VulnerabilityID // "") + " | " + (.PkgName // "") + " | " + (.InstalledVersion // "") + " | " + (.Severity // "") + " | " + (.Title // "") + " |";
-          [
-            "# Docker Image Scan Results",
-            "",
-            "## High and Critical Vulnerabilities",
-            "",
-            "| Vulnerability ID | Package | Version | Severity | Description |",
-            "|------------------|---------|---------|----------|-------------|",
-            (.Results[]? | .Vulnerabilities[]? | select(hr(.Severity)) | to_md),
-            ""
-          ] | join("\n")
-          ' scan-results.json > vulnerability-report.md || echo "# No vulnerabilities found or scan failed." > vulnerability-report.md
-
-      - name: Upload Scan Results
-        uses: actions/upload-artifact@v3
-        with:
-          name: vulnerability-report
-          path: vulnerability-report.md
-
-      - name: Push Docker Image to ECR
-        run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/currency-exchange-sample-service:${{ github.sha }}
-
-      - name: Stop Pipeline on Vulnerabilities
-        if: failure() || steps.extract-vulnerabilities.outputs.contains("CRITICAL")
-        run: exit 1
+  notify:
+    needs: [build_and_scan, deploy]
+    uses: ./.github/workflows/notify.yml
+    with:
+      status: ${{ job.status }}
+      environment: ${{ github.ref_name }}
