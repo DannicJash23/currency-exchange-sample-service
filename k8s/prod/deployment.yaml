@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: currency-exchange
-          image: 009160053040.dkr.ecr.ap-south-1.amazonaws.com/currency-exchange-sample-service:8dfed4d5ec629aae7d297a1ffe8eaf19cddc262e
+          image: 009160053040.dkr.ecr.ap-south-1.amazonaws.com/currency-exchange-sample-service:latest
           ports:
             - containerPort: 8000
           env:
