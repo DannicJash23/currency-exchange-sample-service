@@ -1,0 +1,35 @@
+name: Manual Deployment to Production
+
+on:
+  workflow_dispatch:  # Allows you to manually trigger this workflow from GitHub UI
+
+jobs:
+  deploy_prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    steps:
+      # Set up AWS credentials
+      - name: Set up AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Set up kubectl
+      - name: Set up kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.23.0/bin/linux/amd64/kubectl"
+          chmod +x ./kubectl
+          sudo mv ./kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      # Configure kubectl with EKS
+      - name: Configure kubectl with EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
+
+      # Deploy application to production
+      - name: Deploy Application to EKS (Prod)
+        run: |
+          kubectl apply -f k8s/prod/deployment.yaml
